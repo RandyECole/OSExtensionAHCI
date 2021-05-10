@@ -22,7 +22,7 @@
 #include "scheduler.h"
 #include "support.h"
 
-#include "pci.h"
+#include "ahci.h"
 
 // need init() and idle() addresses
 #include "users.h"
@@ -136,8 +136,7 @@ void _init( void ) {
     _sched_init();
     _clk_init();
     _sio_init();
-    
-    enumeratePCIDevices();
+    _ahci_init();
 
     __cio_puts( "\nModule initialization complete.\n" );
     __cio_puts( "-------------------------------\n" );

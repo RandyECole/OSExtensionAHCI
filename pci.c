@@ -1,6 +1,11 @@
 #include "pci.h"
 #include "common.h"
 #include "cio.h"
+#include "klib.h"
+
+
+static AHCI_CONTROLLER _controller;
+
 
 uint16_t pciConfigReadWord(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address;
@@ -9,14 +14,13 @@ uint16_t pciConfigReadWord(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offs
     uint32_t lfunc = (uint32_t)func;
     uint16_t tmp = 0;
  
-    /* create configuration address as per Figure 1 */
+    /* create configuration address */
     address = (uint32_t)((lbus << 16) | (lslot << 11) |
               (lfunc << 8) | (offset & 0xfc) | ((uint32_t)0x80000000));
  
     /* write out the address */
     __outl(0xCF8, address);
     /* read in the data */
-    /* (offset & 2) * 8) = 0 will choose the first word of the 32 bits register */
     tmp = (uint16_t)((__inl(0xCFC) >> ((offset & 2) * 8)) & 0xffff);
     return (tmp);
 }
@@ -30,12 +34,17 @@ uint8_t getHeaderType(uint8_t bus, uint8_t slot, uint8_t function) {
 }
 
 void checkFunction(uint8_t bus, uint8_t device, uint8_t function) {
-    //If class & subclass == 01 and 06 save the device for setup later
-    //ide is 01 and 01
-    __cio_printf("\nv:%04x, ", pciConfigReadWord(bus, device, function, 0x00));
-    __cio_printf("d:%04x, ", pciConfigReadWord(bus, device, function, 0x02));
-    __cio_printf("c:%04x, ", pciConfigReadWord(bus, device, function, 0x0a));
-    __cio_printf("h:%04x", pciConfigReadWord(bus, device, function, 0x0e));
+    if((pciConfigReadWord(bus, device, function, 0x0a) == 0x0106) & 
+      (pciConfigReadWord(bus, device, function, 0x08) >> 8 == 0x01)) {
+        _controller.bus = bus;
+        _controller.device = device;
+        _controller.function = function;
+        _controller.intPIN = pciConfigReadWord(bus, device, function, 0x3D);
+        _controller.intLine = pciConfigReadWord(bus, device, function, 0x3C);
+        uint16_t addressLo = pciConfigReadWord(bus, device, function, 0x24);
+        uint16_t addressHi = pciConfigReadWord(bus, device, function, 0x26);
+        _controller.address = (addressHi << 16) | addressLo;
+    }
 }
 
 void checkDevice(uint8_t bus, uint8_t device) {
@@ -45,7 +54,7 @@ void checkDevice(uint8_t bus, uint8_t device) {
     if(vendorID == 0xFFFF) return;        // Device doesn't exist
     checkFunction(bus, device, function);
     uint8_t headerType = getHeaderType(bus, device, function);
-    if( (headerType & 0x80) != 0) {
+    if((headerType & 0x80) != 0) {
         /* It is a multi-function device, so check remaining functions */
         for(function = 1; function < 8; function++) {
             if(getVendorID(bus, device, function) != 0xFFFF) {
@@ -55,7 +64,7 @@ void checkDevice(uint8_t bus, uint8_t device) {
     }
 }
 
-void enumeratePCIDevices(){
+void enumeratePCIDevices(void) {
     uint16_t bus;
     uint8_t device;
 
@@ -64,4 +73,8 @@ void enumeratePCIDevices(){
             checkDevice(bus, device);
         }
     }
+}
+
+AHCI_CONTROLLER getController(void) {
+    return _controller;
 }

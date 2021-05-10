@@ -25,8 +25,6 @@
 #include "cio.h"
 #include "sio.h"
 
-#include "hdddriver.h"
-
 // copied from ulib.h
 extern void exit_helper( void );
 
