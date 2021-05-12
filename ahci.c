@@ -29,7 +29,7 @@ static int find_cmdslot(hbaPort_t *port)
 }
 
 
-bool_t get_drive_info(hbaPort_t* port, void* buf)
+static bool_t get_drive_info(hbaPort_t* port, void* buf)
 {
    port->is = (uint32_t) -1;     // Clear pending interrupt bits
    int spin = 0; // Spin lock timeout counter

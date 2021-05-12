@@ -7,7 +7,7 @@
 static ahciController_t _controller;
 
 
-uint16_t pciConfigReadWord(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
+static uint16_t pciConfigReadWord(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
     uint32_t address;
     uint32_t lbus  = (uint32_t)bus;
     uint32_t lslot = (uint32_t)slot;
@@ -25,15 +25,15 @@ uint16_t pciConfigReadWord(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offs
     return (tmp);
 }
 
-uint16_t getVendorID(uint8_t bus, uint8_t slot, uint8_t function) {
+static uint16_t getVendorID(uint8_t bus, uint8_t slot, uint8_t function) {
     return pciConfigReadWord(bus,slot,function,0);
 }
 
-uint8_t getHeaderType(uint8_t bus, uint8_t slot, uint8_t function) {
+static uint8_t getHeaderType(uint8_t bus, uint8_t slot, uint8_t function) {
     return pciConfigReadWord(bus,slot,function,0x0E) & 0x00FF;
 }
 
-void checkFunction(uint8_t bus, uint8_t device, uint8_t function) {
+static void checkFunction(uint8_t bus, uint8_t device, uint8_t function) {
     if((pciConfigReadWord(bus, device, function, 0x0a) == 0x0106) & 
       (pciConfigReadWord(bus, device, function, 0x08) >> 8 == 0x01)) {
         _controller.bus = bus;
@@ -47,7 +47,7 @@ void checkFunction(uint8_t bus, uint8_t device, uint8_t function) {
     }
 }
 
-void checkDevice(uint8_t bus, uint8_t device) {
+static void checkDevice(uint8_t bus, uint8_t device) {
     uint8_t function = 0;
 
     uint16_t vendorID = getVendorID(bus, device, function);
