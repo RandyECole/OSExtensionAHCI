@@ -539,7 +539,7 @@ void _ahci_init()
    //DEMO CODE
    //CAREFULL ON REAL HARDWARE. WILL OVERWRITE DISK.
    //Reads the drive (sector 5) then writes to the drive in the same place.
-   void* buffer = _km_page_alloc(1);
+   /*void* buffer = _km_page_alloc(1);
    __memset(buffer, 512, 0xFF);
    __cio_printf("\nClear buffer: %08x", *(uint32_t*)buffer);
    _read_disk(_hddDevs.devices[0], 5, 0, 1, buffer);
@@ -550,7 +550,7 @@ void _ahci_init()
    __cio_printf("\nWrote to drive");
    _read_disk(_hddDevs.devices[0], 5, 0, 1, buffer);
    __cio_printf("\nRead drive: %08x", *(uint32_t*)buffer);
-   _km_page_free(buffer);
+   _km_page_free(buffer);*/
    //END DEMO CODE
 
    
