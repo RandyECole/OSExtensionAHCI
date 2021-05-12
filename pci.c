@@ -4,7 +4,7 @@
 #include "klib.h"
 
 
-static AHCI_CONTROLLER _controller;
+static ahciController_t _controller;
 
 
 uint16_t pciConfigReadWord(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset) {
@@ -64,7 +64,7 @@ void checkDevice(uint8_t bus, uint8_t device) {
     }
 }
 
-void enumeratePCIDevices(void) {
+void _enumerate_pci_devices(void) {
     uint16_t bus;
     uint8_t device;
 
@@ -75,6 +75,6 @@ void enumeratePCIDevices(void) {
     }
 }
 
-AHCI_CONTROLLER getController(void) {
+ahciController_t _get_controller(void) {
     return _controller;
 }

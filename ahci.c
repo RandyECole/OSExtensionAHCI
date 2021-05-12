@@ -5,15 +5,16 @@
 #include "cio.h"
 #include "x86pic.h"
 #include "support.h"
+#include "kmem.h"
 
-static HBA_MEM* _abar;
-static HBA_PORT* _portsList[32];
+static hbaMem_t* _abar;
+static hbaPort_t* _portsList[32];
 static uint8_t _portsAvail;
-static HDD_DEVICE_LIST _hddDevs;
+static hddDeviceList_t _hddDevs;
 
 
 // Find a free command list slot
-static int find_cmdslot(HBA_PORT *port)
+static int find_cmdslot(hbaPort_t *port)
 {
    // If not set in SACT and CI, the slot is free
    uint32_t slots = (port->sact | port->ci);
@@ -28,8 +29,7 @@ static int find_cmdslot(HBA_PORT *port)
 }
 
 
-
-bool_t getDrives(HBA_PORT *port, uint16_t *buf)
+bool_t get_drive_info(hbaPort_t* port, void* buf)
 {
    port->is = (uint32_t) -1;     // Clear pending interrupt bits
    int spin = 0; // Spin lock timeout counter
@@ -37,15 +37,15 @@ bool_t getDrives(HBA_PORT *port, uint16_t *buf)
    if (slot == -1)
       return false;
 
-   HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER*)port->clb;
+   hbaCmdHeader_t *cmdheader = (hbaCmdHeader_t*)port->clb;
    cmdheader += slot;
-   cmdheader->cfl = sizeof(FIS_REG_H2D)/sizeof(uint32_t);   // Command FIS size
+   cmdheader->cfl = sizeof(fisRegH2d_t)/sizeof(uint32_t);   // Command FIS size
    cmdheader->w = 0;    // Read from device
    cmdheader->prdtl = (uint16_t) 1;   // PRDT entries count
  
-   HBA_CMD_TBL *cmdtbl = (HBA_CMD_TBL*)(cmdheader->ctba);
-   __memset(cmdtbl, 0, sizeof(HBA_CMD_TBL) +
-      (cmdheader->prdtl-1)*sizeof(HBA_PRDT_ENTRY));
+   hbaCmdTbl_t *cmdtbl = (hbaCmdTbl_t*)(cmdheader->ctba);
+   __memset(cmdtbl, 0, sizeof(hbaCmdTbl_t) +
+      (cmdheader->prdtl-1)*sizeof(hbaPrdtEntry_t));
 
    // Last entry
    cmdtbl->prdt_entry[0].dba = (uint32_t) buf;
@@ -53,9 +53,9 @@ bool_t getDrives(HBA_PORT *port, uint16_t *buf)
    cmdtbl->prdt_entry[0].i = 1;
  
    // Setup command
-   FIS_REG_H2D *cmdfis = (FIS_REG_H2D*)(&cmdtbl->cfis);
+   fisRegH2d_t *cmdfis = (fisRegH2d_t*)(&cmdtbl->cfis);
  
-   cmdfis->fis_type = FIS_TYPE_REG_H2D;
+   cmdfis->fis_type = fis_type_reg_h2d;
    cmdfis->c = 1; // Command
    cmdfis->command = ATA_CMD_IDENTIFY;
    cmdfis->device = 0;  // Master device
@@ -70,8 +70,6 @@ bool_t getDrives(HBA_PORT *port, uint16_t *buf)
       __cio_printf("\nPort is hung");
       //return false;
    }
- 
-//002800400010000002007e000000003f000000003030514d3520303020202020202020202020202002000003322e00042020352b5145202020484d55444441524b204953202020202020202020202020202020202020202020202020801020200b0000010200000000070200001000289d80003f011000000000a00000070007ffffff03
 
    port->ci = 1<<slot;  // Issue command
  
@@ -99,7 +97,7 @@ bool_t getDrives(HBA_PORT *port, uint16_t *buf)
    return true;
 }
 
-static bool_t ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
+static bool_t ahci_write(hbaPort_t *port, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
 {
    port->is = (uint32_t) -1;     // Clear pending interrupt bits
    int spin = 0; // Spin lock timeout counter
@@ -107,15 +105,15 @@ static bool_t ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth, uint3
    if (slot == -1)
       return false;
  
-   HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER*)port->clb;
+   hbaCmdHeader_t *cmdheader = (hbaCmdHeader_t*)port->clb;
    cmdheader += slot;
-   cmdheader->cfl = sizeof(FIS_REG_H2D)/sizeof(uint32_t);   // Command FIS size
+   cmdheader->cfl = sizeof(fisRegH2d_t)/sizeof(uint32_t);   // Command FIS size
    cmdheader->w = 1;    // Write to device
    cmdheader->prdtl = (uint16_t)((count-1)>>4) + 1;   // PRDT entries count
  
-   HBA_CMD_TBL *cmdtbl = (HBA_CMD_TBL*)(cmdheader->ctba);
-   __memset(cmdtbl, 0, sizeof(HBA_CMD_TBL) +
-      (cmdheader->prdtl-1)*sizeof(HBA_PRDT_ENTRY));
+   hbaCmdTbl_t *cmdtbl = (hbaCmdTbl_t*)(cmdheader->ctba);
+   __memset(cmdtbl, 0, sizeof(hbaCmdTbl_t) +
+      (cmdheader->prdtl-1)*sizeof(hbaPrdtEntry_t));
  
    // 8K bytes (16 sectors) per PRDT
    int i = 0;
@@ -133,9 +131,9 @@ static bool_t ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth, uint3
    cmdtbl->prdt_entry[i].i = 1;
  
    // Setup command
-   FIS_REG_H2D *cmdfis = (FIS_REG_H2D*)(&cmdtbl->cfis);
+   fisRegH2d_t *cmdfis = (fisRegH2d_t*)(&cmdtbl->cfis);
  
-   cmdfis->fis_type = FIS_TYPE_REG_H2D;
+   cmdfis->fis_type = fis_type_reg_h2d;
    cmdfis->c = 1; // Command
    cmdfis->command = ATA_CMD_WRITE_DMA_EX;
  
@@ -188,7 +186,7 @@ static bool_t ahci_write(HBA_PORT *port, uint32_t startl, uint32_t starth, uint3
    return true;
 }
 
-static bool_t ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
+static bool_t ahci_read(hbaPort_t *port, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
 {
    port->is = (uint32_t) -1;     // Clear pending interrupt bits
    int spin = 0; // Spin lock timeout counter
@@ -196,15 +194,15 @@ static bool_t ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32
    if (slot == -1)
       return false;
  
-   HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER*)port->clb;
+   hbaCmdHeader_t *cmdheader = (hbaCmdHeader_t*)port->clb;
    cmdheader += slot;
-   cmdheader->cfl = sizeof(FIS_REG_H2D)/sizeof(uint32_t);   // Command FIS size
+   cmdheader->cfl = sizeof(fisRegH2d_t)/sizeof(uint32_t);   // Command FIS size
    cmdheader->w = 0;    // Read from device
    cmdheader->prdtl = (uint16_t)((count-1)>>4) + 1;   // PRDT entries count
  
-   HBA_CMD_TBL *cmdtbl = (HBA_CMD_TBL*)(cmdheader->ctba);
-   __memset(cmdtbl, 0, sizeof(HBA_CMD_TBL) +
-      (cmdheader->prdtl-1)*sizeof(HBA_PRDT_ENTRY));
+   hbaCmdTbl_t *cmdtbl = (hbaCmdTbl_t*)(cmdheader->ctba);
+   __memset(cmdtbl, 0, sizeof(hbaCmdTbl_t) +
+      (cmdheader->prdtl-1)*sizeof(hbaPrdtEntry_t));
  
    // 8K bytes (16 sectors) per PRDT
    int i = 0;
@@ -222,9 +220,9 @@ static bool_t ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32
    cmdtbl->prdt_entry[i].i = 1;
  
    // Setup command
-   FIS_REG_H2D *cmdfis = (FIS_REG_H2D*)(&cmdtbl->cfis);
+   fisRegH2d_t *cmdfis = (fisRegH2d_t*)(&cmdtbl->cfis);
  
-   cmdfis->fis_type = FIS_TYPE_REG_H2D;
+   cmdfis->fis_type = fis_type_reg_h2d;
    cmdfis->c = 1; // Command
    cmdfis->command = ATA_CMD_READ_DMA_EX;
  
@@ -278,7 +276,7 @@ static bool_t ahci_read(HBA_PORT *port, uint32_t startl, uint32_t starth, uint32
 }
 
 // Start command engine
-static void start_cmd(HBA_PORT *port)
+static void start_cmd(hbaPort_t *port)
 {
    // Wait until CR (bit15) is cleared
    while (port->cmd & HBA_PxCMD_CR)
@@ -291,7 +289,7 @@ static void start_cmd(HBA_PORT *port)
 }
  
 // Stop command engine
-static void stop_cmd(HBA_PORT *port)
+static void stop_cmd(hbaPort_t *port)
 {
    // Clear ST (bit0)
    port->cmd &= ~HBA_PxCMD_ST;
@@ -311,7 +309,7 @@ static void stop_cmd(HBA_PORT *port)
  
 }
 
-static void port_rebase(HBA_PORT *port, int portno)
+static void port_rebase(hbaPort_t *port, int portno)
 {
    stop_cmd(port);   // Stop command engine
  
@@ -331,7 +329,7 @@ static void port_rebase(HBA_PORT *port, int portno)
  
    // Command table offset: 40K + 8K*portno
    // Command table size = 256*32 = 8K per port
-   HBA_CMD_HEADER *cmdheader = (HBA_CMD_HEADER*)(port->clb);
+   hbaCmdHeader_t *cmdheader = (hbaCmdHeader_t*)(port->clb);
    for (int i=0; i<32; i++)
    {
       cmdheader[i].prdtl = 8; // 8 prdt entries per command table
@@ -347,14 +345,14 @@ static void port_rebase(HBA_PORT *port, int portno)
 
 static void _ahci_isr(int vector, int code)
 {
-   __cio_printf("\nIN AHCI ISR\n");
+   //__cio_printf("\nIN AHCI ISR\n");
    uint32_t pi = _abar->pi;
    uint32_t is = _abar->is;
    for(uint8_t i = 0; i < 32; i++){
       if(pi & 1 && is & 1){
          _abar->pi |= 1 << i;
-         uint32_t port_is = _abar->ports[i].is;
-         
+         //uint32_t port_is = _abar->ports[i].is;
+         //Never Here
          //check port
          //writeback
          //if error bit set, reset port/retry commands as necessary.
@@ -366,16 +364,16 @@ static void _ahci_isr(int vector, int code)
    __outb( PIC_PRI_CMD_PORT, PIC_EOI );
 }
 
-static int check_type(HBA_PORT *port)
+static int check_type(hbaPort_t *port)
 {
    uint32_t ssts = port->ssts;
  
    uint8_t ipm = (ssts >> 8) & 0x0F;
    uint8_t det = ssts & 0x0F;
  
-   if (det != HBA_PORT_DET_PRESENT) // Check drive status
+   if (det != hbaPort_t_DET_PRESENT) // Check drive status
       return AHCI_DEV_NULL;
-   if (ipm != HBA_PORT_IPM_ACTIVE)
+   if (ipm != hbaPort_t_IPM_ACTIVE)
       return AHCI_DEV_NULL;
  
    switch (port->sig)
@@ -392,50 +390,58 @@ static int check_type(HBA_PORT *port)
 }
 
 
-HDD_DEVICE_LIST getDevLst()
+hddDeviceList_t _get_device_list()
 {
    return _hddDevs;
 }
 
-bool_t writeDisk(HDD_DEVICE device, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
+bool_t _write_disk(hddDevice_t device, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
 {
+   uint64_t absaddr = ((uint64_t)starth << 32) | startl;
+   if((absaddr + count) > device.sector_count){
+      return false;
+   }
    return ahci_write(device.port, startl, starth, count, buf);
 }
 
-bool_t readDisk(HDD_DEVICE device, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
-{
+bool_t _read_disk(hddDevice_t device, uint32_t startl, uint32_t starth, uint32_t count, uint16_t *buf)
+{  
+   uint64_t absaddr = ((uint64_t)starth << 32) | startl;
+   if((absaddr + count) > device.sector_count){
+      return false;
+   }
    return ahci_read(device.port, startl, starth, count, buf);
 }
 
 
 void _ahci_init()
 {
+   __cio_printf(" AHCI:");
    //find device
-   enumeratePCIDevices();
-   _abar = (HBA_MEM*)getController().address;
-
-   //enable interrupts(0@10) and memory space(1@1)
+   _enumerate_pci_devices();
+   _abar = (hbaMem_t*)_get_controller().address;
 
    //check if device supports legacy modes
    if((_abar->cap & 0x00040000) == 0){
       //set ahci enable
-      __cio_printf("\nAHCI First Enable");
+      //__cio_printf("\nAHCI First Enable");
       _abar->ghc |= 0x80000000;
    }
 
    //Check if need to perform handoff
    if(_abar->cap2 & 0x0001){
-      __cio_printf("\nBIOS/OS Handoff");
+      //__cio_printf("\nBIOS/OS Handoff");
       //handoff
       //reset controller
+      __cio_printf(" Fail");
       return;
    }
    else{
-      __cio_printf("\nNo BIOS/OS Handoff");
+      //__cio_printf("\nNo BIOS/OS Handoff");
    }
 
    //Install isr and given line
-   __install_isr(PIC_PRI_CMD_PORT | getController().intLine, _ahci_isr);
+   __install_isr(PIC_PRI_CMD_PORT | _get_controller().intLine, _ahci_isr);
 
    for(uint8_t i = 0; i < 32; i++){
       _abar->ports[i].cmd &= 0xFFFFFFEE;
@@ -449,7 +455,7 @@ void _ahci_init()
 
    if((_abar->cap & 0x00040000) == 0){
       //set ahci enable
-      __cio_printf("\nAHCI Second Enable");
+      //__cio_printf("\nAHCI Second Enable");
       _abar->ghc |= 0x80000000;
    }
 
@@ -464,14 +470,14 @@ void _ahci_init()
    //get ports and numbers
    __memset(_portsList, 32 * 4, 0);
    _portsAvail = 0;
-   HBA_PORT* port = _abar->ports;
+   hbaPort_t* port = _abar->ports;
    uint32_t pi = _abar->pi;
    for(uint8_t i = 0; i < 32; i++){
       if(pi & 1){
          uint8_t deviceType = check_type(&port[i]);
          if(deviceType == AHCI_DEV_SATA){
             _portsList[_portsAvail++] = &port[i];
-            __cio_printf("\nFound Sata Device at Port: %d", i);
+            //__cio_printf("\nFound Sata Device at Port: %d", i);
          }
       }
       pi >>= 1;
@@ -483,7 +489,7 @@ void _ahci_init()
          count++;
       }
       if(count == 1000000){
-         __cio_printf("\nFail:");
+         //__cio_printf("\nFail:");
          continue;
       }
       _portsList[i]->serr = 0xFFFFFFFF;
@@ -491,37 +497,46 @@ void _ahci_init()
       _hddDevs.count++;
    }
 
-   // int* t = 0x600000;
-   // __memset(t, 512, 255);
-   // __cio_printf("\nBuff:");
-   // for(int i = 0; i < 128; i++)
-   //    __cio_printf("%08x", *(t + i));
+   identifyDeviceData_t* tempIDData = (identifyDeviceData_t*)_km_page_alloc(1);
+   __memset(tempIDData, 512, 255);
 
-   // __memset(t, 128*4, 255);
-   // __cio_printf("\nSetBuff:%08x", *t);
-   // readDisk(_hddDevs.devices[0], 2, 0, 1, 0x600000);
-   // __cio_printf("\nRead:%08x", *t);
-   // __memset(t, 128*4, 200);
-   // __cio_printf("\nSetBuff:%08x", *t);
-   // writeDisk(_hddDevs.devices[0], 2, 0, 1, 0x600000);
-   // readDisk(_hddDevs.devices[0], 2, 0, 1, 0x600000);
-   // __cio_printf("\nRead:%08x", *t);
+   for(int i = 0; i < _hddDevs.count; i++){
+      get_drive_info(_hddDevs.devices[i].port, tempIDData);
 
-   // getDrives(_portsList[0], 0x600000);
-   // __cio_printf("\nBuff:");
-   // IDENTIFY_DEVICE_DATA* dat = t;
-   // __cio_printf("%s", dat->ModelNumber);
-   // __cio_printf("%d   ", dat->Max48BitLBA[0]);
-   // __cio_printf("%d", dat->Max48BitLBA[1]);
-   // for(int i = 0; i < (512/4); i++)
-   //    __cio_printf("%08x", *(t + i));
+      uint32_t secl = 0;
+      uint32_t sech = 0;
+      uint8_t shift = 0;
 
-/*
-For all the implemented ports:
-Enable interrupts for the port. The D2H bit will signal completed commands.
-Read signature/status of the port to see if it connected to a drive.
-Send IDENTIFY ATA command to connected drives. Get their sector size and count. 
-*/
+      if(tempIDData->CommandSetSupport.BigLba) {
+         if(tempIDData->CommandSetActive.BigLba) {
+            secl = tempIDData->Max48BitLBA[1];
+            sech = tempIDData->Max48BitLBA[0];
+            shift = 32;
+         }
+         else {
+            secl = tempIDData->ExtendedNumberOfUserAddressableSectors[1];
+            sech = tempIDData->ExtendedNumberOfUserAddressableSectors[0];
+            shift = 32;
+         }
+      }
+      else {
+         secl = tempIDData->UserAddressableSectors;
+         shift = 0;
+      }
 
+      _hddDevs.devices[i].sector_count = (uint64_t)secl | ((uint64_t)sech << shift);
+
+      if(tempIDData->PhysicalLogicalSectorSize.LogicalSectorLongerThan256Words) {
+         _hddDevs.devices[i].sector_size = 512;
+      }
+      else {
+         _hddDevs.devices[i].sector_size = 256;
+      }
+      _hddDevs.devices[i].total_bytes = _hddDevs.devices[i].sector_count * _hddDevs.devices[i].sector_size;
+   }
+   _km_page_free(tempIDData);
+
+   
+   __cio_printf(" done");
 }
 
