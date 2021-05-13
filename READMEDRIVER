@@ -1,4 +1,4 @@
-To enable the output shown during the demo uncomment lines 541-552 in ahci.c.
+To enable the output shown during the demo uncomment lines 540-551 in ahci.c.
 This assumes at least one sata ata (not atapi) drive is connected to the system.
 
 To run the demo or just the regular driver a drive can be created with:
