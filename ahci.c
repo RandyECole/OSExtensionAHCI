@@ -419,7 +419,12 @@ void _ahci_init()
    __cio_printf(" AHCI:");
    //find device
    _enumerate_pci_devices();
-   _abar = (hbaMem_t*)_get_controller().address;
+   ahciController_t controller = _get_controller();
+   if(controller.address == NULL) {
+      __cio_printf(" Failed: no controller found.");
+      return;
+   }
+   _abar = (hbaMem_t*)controller.address;
 
    //check if device supports legacy modes
    if((_abar->cap & 0x00040000) == 0){
@@ -433,7 +438,7 @@ void _ahci_init()
       //__cio_printf("\nBIOS/OS Handoff");
       //handoff
       //reset controller
-      __cio_printf(" Fail");
+      __cio_printf(" Failed: BIOS/OS handoff not supported.");
       return;
    }
    else{
@@ -498,10 +503,17 @@ void _ahci_init()
    }
 
    identifyDeviceData_t* tempIDData = (identifyDeviceData_t*)_km_page_alloc(1);
+   if(tempIDData == NULL) {
+      _kpanic("AHCI", "Page alloc failed for identify data.");
+      return;
+   }
    __memset(tempIDData, 4000, 0);
 
    for(int i = 0; i < _hddDevs.count; i++){
-      get_drive_info(_hddDevs.devices[i].port, tempIDData);
+      bool_t ret = get_drive_info(_hddDevs.devices[i].port, tempIDData);
+      if(!ret) {
+         _kpanic("AHCI", "Failed to get port ATA Identify data.");
+      }
 
       uint32_t secl = 0;
       uint32_t sech = 0;
